@@ -9,15 +9,16 @@ output: html_document
 ```{r setup, include=FALSE}
 require(knitr)
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
-pacman::p_load(tidyverse, jpeg, grid, lme4, lmerTest, DHARMa, MuMIn)
+pacman::p_load(tidyverse, jpeg, grid, lme4, lmerTest, DHARMa, MuMIn, bayesplot, brms, rethinking,ggplot2,hrbrthemes,dplyr,tidyr,viridis)
+
 ```
 
 ## Load the data if necessary
 
 ```{r load data}
 ## We need the guess_max = Inf here, even though this will make the file loading slower
-Fixations <- read_csv("data/Fixations_final.csv", guess_max = Inf)
-Saccades <- read_csv("data/Saccades_final.csv")
+Fixations <- read_csv("/Users/pernillebrams/Desktop/UNI/4th semester/SocKultExam/Eye-Tracking-Workhop-CogSci-F2021/data/Fixations_final.csv", guess_max = Inf)
+Saccades <- read_csv("/Users/pernillebrams/Desktop/UNI/4th semester/SocKultExam/Eye-Tracking-Workhop-CogSci-F2021/data/Saccades_final.csv")
 ```
 
 ## Visual foraging (Rhodes et al., 2014)
@@ -26,35 +27,76 @@ We want to test the hypothesis that eye movements are affected by task structure
 
 ### Hypothesis 1: Longer tail for saccades amplitude in Search (vs Count) condition
 
-We know from the paper that the amplitude of saccades in the searching task has a peculiar frequency distribution with a long tail. This means that most of the saccades have very short amplitude, but few of them have very high amplitude (since our eyes are "hopping" to a new place where we can forage). The same may not be true for the counting task, where we expect there to be less variation in the amplitude of saccades (thus a shorter tail). 
+We know from the paper that the amplitude of saccades in the searching task has a peculiar frequency distribution with a long tail. This means that most of the saccades have very short amplitued, but few of them have very high amplitude (since our eyes are "hopping" to a new place where we can forage). The same may not be true for the counting task, where we expect there to be less variation in the amplitude of saccades (thus a shorter tail). 
 
 Let's start by testing this hypothesis. First of all we plot the density distribution of saccade amplitudes in the two tasks:
 
 ```{r}
-...
+# Plotting density distribution of saccade amplitudes in the two tasks
+Saccades_VF <- Saccades %>% filter(Saccades$Task == "Visual foraging")
+Saccades_SE <- Saccades %>% filter(Saccades$Task == "Social engagement")
 
+# First look 
+par(mfrow = c(1,2))
+dens(Saccades_VF$Amplitude)+title("Saccade Amp., Density dist. 
+Task: Visual Foraging")
+dens(Saccades_SE$Amplitude)+title("Saccade Amp., Density dist.
+Task: Social Engagement")
+
+# We know from the Rhodes paper that the amplitude of saccades in the search task has a certain frequency distribution with a long tail. This means that most of the saccades have a very short amplitude, but few have a high - since our eyes hop to new places where we can forage. The same may not be true for the counting task, where we expect there to be less variation in the amplitude of saccades - so a shorter tail in the count condition. Search or Count - With transparency plotted here - 
+# We expect:  Long tail for saccades amplitude in Search (vs Count) condition.
+VF <- ggplot(data=Saccades_VF, aes(x=Amplitude, group=SearchOrCount, fill=SearchOrCount)) +
+    geom_density(adjust=1.5, alpha=.4) +
+    theme_ipsum()+ggtitle("Search or Count in Visual Foraging, amplitudes plotted")
+VF
 ```
 
 The plot seems to show that searching has a thin head and a long tail, whereas the opposite is true of counting.
 
 Let's model the data. Start by trying to figure out how the data are distributed. We will first make a gaussian model for baseline, which we know doesn't make sense given what the data looks like. Find the fixed and random effect structure that you think is most appropriate.
 
-```{r}
-mGaus <- ...
+Note: m_HR <- lmerTest::lmer(change_HR_self ~ 0 + (HR_self + HR_diff):Condition + (0 + Condition|Participant) + (0 + Condition|Group), data = dfmerge %>% filter(Type == "Original"), control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
 
-summary(mGaus)
+```{r}
+
 ```
 
 We can then try modelling the data with a lognormal distribution, which seems more appropriate to our data. (Notice that for the lognormal model to work, Amplitude should be different from zero -- please fix if necessary).
 
 ```{r}
-Saccades <- Saccades %>% filter(Amplitude > 0)
-
-mLog <- ...
-
-summary(mLog)
+# NA-omit
+Saccades_VF <- Saccades_VF %>% na.omit()
+Saccades_VF <- Saccades_VF %>% filter(Amplitude > 0)
+Saccades_VF$LogAmplitude <- log(Saccades_VF$Amplitude)
 ```
 
+
+```{r}
+#Fabio way
+
+mGaus <- 
+  glmer(
+    Amplitude ~ SearchOrCount + 
+      (1 + SearchOrCount | ParticipantID)+ # The average saccade amplitude changes per Participant, and per stimulus, and they VARY in the two conditions (SearchOrCount as slope)
+      (1 + SearchOrCount | Stimulus),
+    family = gaussian(link = "identity"),
+    data = Saccades_VF
+  )
+
+summary(mGaus)
+
+mLog <- 
+  glmer(
+    Amplitude ~ SearchOrCount + 
+      (1 + SearchOrCount | ParticipantID)+ 
+      (1 + SearchOrCount | Stimulus),
+    family = gaussian(link = "log"),
+    data = Saccades_VF
+  )
+
+summary(mLog)
+
+```
 The mean amplitude in the Search condition is significantly higher, which is consistent with the plot. But which model is the best one? Generate predictions from the models and plot their density, then compare the predictions to the distribution of the actual data. What do you notice?
 
 ```{r}
@@ -64,14 +106,21 @@ pm2 <- predict(mLog)
 par(mfrow=c(1,3))
 plot(density(pm1), main = "Gaussian")
 plot(density(pm2), main = "Log-transformed")
+
 plot(density(Saccades$Amplitude), main = "Observed saccade amplitude")
+plot(density(Saccades_VF$Amplitude), main = "Observed saccade amplitude")
+plot(density(Saccades_SE$Amplitude), main = "Observed saccade amplitude")
+
+plot(density(log(Saccades$Amplitude)), main = "Observed saccade amplitude")
+
 ```
+
 
 Numericaly compare the model predictions to the actual data (in absolute values) in order to get an idea of how well the model predicts the data:
 
 ```{r}
-summary(abs(pm1- ... ))
-summary(abs(pm2- ... ))
+summary(abs(pm1-Saccades_VF$Amplitude))
+summary(abs(pm2-Saccades_VF$Amplitude))
 ```
 
 We can compare observed data and model predictions more formally by looking at the residuals of the fitted models. To do this, we use the DHARMa (residual Diagnostics for HierArchical Regression Models) package:
@@ -86,21 +135,32 @@ dLog <- simulateResiduals(mLog, n = 250)
 Now we can plot the residuals for the gaussian and lognormal models and see which model does best. Do we notice any  differences? Is one model doing better than the other?
 
 ```{r}
-...
+plot(dGaus)
+plot(dLog)
+
+plot(density(dGaus$scaledResiduals))
+plot(density(dLog$scaledResiduals))
 
 ```
 
 Lastly, we can use the r.squaredGLMM() function from the MuMIn (Multi-Model Inference) package in order to calculate conditional and marginal R^2 of the two models to get a measure of their goodness of fit. Which model provides the best fit to the data?
 
 ```{r}
-...
+r.squaredGLMM(mGaus) # R2m: 0.07355488 R2c: 0.1085559
+r.squaredGLMM(mLog) #R2m: 0.09627207 R2c: 0.134115
+
+anova(mGaus, mLog)
+AIC(mGaus, mLog)
 
 ```
 
 We can confirm these results by simply counting the number of very long saccades in the two conditions. One way of operationalize this may be to define a "Long" saccade as one that is above 2 SD from the mean, and a "Short" saccade as one that is below 2 SD from the mean. You can code "Long" as 1 and "Short" as 0.
 
 ```{r}
-Saccades$LongSaccade <- ...
+Saccades_VF$Amplitude_scaled <- scale(Saccades_VF$Amplitude, center = TRUE, scale = TRUE)
+
+Saccades_VF$LongSaccade <- ifelse(Saccades_VF$Amplitude_scaled > 2, 1, ifelse(Saccades_VF$Amplitude_scaled < 2, 0, NA)) %>% as.factor()
+
 ```
 
 Using logistic regression, test the predictions that the probability of saccade amplitude being long is higher in the Search condition than in the Count condition:
@@ -108,13 +168,27 @@ Using logistic regression, test the predictions that the probability of saccade 
 ```{r}
 ## Table the data first
 table(
-  Saccades[Saccades$Task == "Visual foraging", ]$LongSaccade,
-  Saccades[Saccades$Task == "Visual foraging", ]$SearchOrCount
+  Saccades_VF[Saccades_VF$Task == "Visual foraging", ]$LongSaccade,
+  Saccades_VF[Saccades_VF$Task == "Visual foraging", ]$SearchOrCount
   )
 
-mLogit <- ...
+# Just to some factoring
+Saccades_VF$SearchOrCount <- as.factor(Saccades_VF$SearchOrCount)
+
+mLogit <- glmer(LongSaccade ~ 0 + SearchOrCount + 
+                  (0 + SearchOrCount|ParticipantID) + 
+                  (0 + SearchOrCount|Stimulus), 
+                Saccades_VF, family = binomial)
 
 summary(mLogit)
+
+# probability for estimate of intercept (the probability of LongSaccade given that you are in Count-mode.. )
+boot::inv.logit(-4.0669) # 0.01%
+
+# probability for estimate of going from first level to second level in the "SearchOrCount" variable, i.e. from count to search condition. The significant p-value for this estimate suggests that being in search mode instead of count mode significantly affects the probability of having a long saccade.
+boot::inv.logit(-2.7208) # 6%
+
+
 ```
 
 What does this model show?
@@ -126,7 +200,6 @@ We can imagine that people make slightly longer fixations when counting objects 
 Let's start by plotting fixation duration in the two conditions:
 
 ```{r}
-...
 
 ```
 
@@ -203,7 +276,6 @@ We can then look at how pupil size changes over time. This is a good way to acco
 Plot the data using geom_smooth(method = "gam") in ggplot to see how pupil size changes over time. Remember to only include data from the Social engagement task. Include both Ostensiveness and Direction as variables in the plot. What do we see?
 
 ```{r}
-...
 
 ```
 
